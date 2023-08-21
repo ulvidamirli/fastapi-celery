@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+
+  fastapi:
+    container_name: fastapi
+    build: ./fastapi
+    command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
+    ports:
+      - 8000:8000
+    volumes:
+      - ./fastapi:/code
+    networks:
+      - postgres
+      - app-network
+    depends_on:
+      - postgres
+      - rabbitmq
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/main_db
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672/vhost
+
+  rabbitmq:
+    container_name: rabbitmq
+    image: rabbitmq:3.8-management-alpine
+    ports:
+      - 15673:15672
+      - 5673:5672
+    networks:
+      - app-network
+    environment:
+      RABBITMQ_DEFAULT_VHOST: vhost
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  celery_worker:
+    container_name: celery_worker
+    build: ./fastapi
+    command: celery -A app.celeryconfig worker -l DEBUG -B
+    volumes:
+      - ./fastapi:/code
+    networks:
+      - app-network
+      - postgres
+    depends_on:
+      - rabbitmq
+      - fastapi
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/main_db
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672/vhost
+    stdin_open: true
+
+  postgres:
+    container_name: postgres
+    image: postgres:15.3
+    expose:
+      - 5432:5432
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=main_db
+
+
+networks:
+  postgres:
+    driver: bridge
+  app-network:
+    driver: bridge
